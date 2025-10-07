@@ -14,17 +14,17 @@ class MainWindow(QMainWindow):
         self.setStyleSheet("background-color: lightgray;")
         # 创建菜单栏
         self.create_menu()
-        # 创建工具栏
-        self.create_toolbar()
-
-        # 创建画布实例
+        # 创建画布实例（需先创建，再创建工具栏以绑定缩放按钮）
         self.drawing_widget = DrawingWidget()
         self.setCentralWidget(self.drawing_widget)
+
+        # 创建工具栏
+        self.create_toolbar()
 
     def create_toolbar(self):
         toolbar = QToolBar("绘图工具")
         self.addToolBar(toolbar)
-        tools = ["直线", "矩形", "圆形", "多边形"]
+        tools = ["选择","直线", "矩形", "圆形", "多边形"]
         for tname in tools:
             btn = QPushButton(tname)
             # 连接点击信号到处理函数
@@ -32,13 +32,35 @@ class MainWindow(QMainWindow):
             toolbar.addWidget(btn)
 
         toolbar.addSeparator()
+        # 缩放控制
+        zoom_in_btn = QPushButton("放大")
+        zoom_in_btn.clicked.connect(self.drawing_widget.zoom_in)
+        toolbar.addWidget(zoom_in_btn)
+
+        zoom_out_btn = QPushButton("缩小")
+        zoom_out_btn.clicked.connect(self.drawing_widget.zoom_out)
+        toolbar.addWidget(zoom_out_btn)
+
+        zoom_reset_btn = QPushButton("重置缩放")
+        zoom_reset_btn.clicked.connect(self.drawing_widget.zoom_reset)
+        toolbar.addWidget(zoom_reset_btn)
+
+        toolbar.addSeparator()
         # 添加颜色选择按钮
-        color_btn = QPushButton("颜色")
+        color_btn = QPushButton("边框颜色")
         color_btn.clicked.connect(self.select_color)
         toolbar.addWidget(color_btn)
+        # 填充颜色选择
+        fill_color_btn = QPushButton("填充颜色")
+        fill_color_btn.clicked.connect(self.select_fill_color)
+        toolbar.addWidget(fill_color_btn)
+        # 无填充按钮
+        no_fill_btn = QPushButton("无填充")
+        no_fill_btn.clicked.connect(self.set_no_fill)
+        toolbar.addWidget(no_fill_btn)
         # 添加线宽选择按钮
         toolbar.addWidget(QLabel("线宽:"))
-        self.width_spin = QSpinBox()
+        self.width_spin = QSpinBox() 
         self.width_spin = QSpinBox()
         self.width_spin.setRange(1, 10)  # 线宽范围1-10
         self.width_spin.setValue(2)
@@ -47,17 +69,17 @@ class MainWindow(QMainWindow):
 
     def set_current_tool(self, tname):
         tool_map = {
-            "直线": "line",
+            "选择": "select",
+            "直线": "line", 
             "矩形": "rect",
             "圆形": "circle",
             "多边形": "polygon"
         }
-        tool_id = tool_map.get(tname, "line")
+        tool_id = tool_map.get(tname, "select")
         print(f"当前选择的工具：{tname}")
 
-        # 更新画布的当前工具
-        self.drawing_widget.current_tool = tool_id
-        self.drawing_widget.update()  # 触发重绘
+        # 调用画布组件的工具设置方法
+        self.drawing_widget.set_tool(tool_id)
 
     def select_color(self):
         color = QColorDialog.getColor()
@@ -69,12 +91,26 @@ class MainWindow(QMainWindow):
         self.drawing_widget.current_line_width = width
         print(f"设置线宽为：{width}")
 
+    def select_fill_color(self):
+        color = QColorDialog.getColor()
+        if color.isValid():
+            self.drawing_widget.current_fill_color = color
+            print(f"填充颜色设置为: {color.name()}")
+
+    def set_no_fill(self):
+        self.drawing_widget.current_fill_color = None
+        print("设置为无填充")
+
+
     def create_menu(self):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("文件")
         # 保存动作
         save_action = file_menu.addAction("保存")
         save_action.triggered.connect(self.save_drawing)
+        # 导出图片
+        export_action = file_menu.addAction("导出图片")
+        export_action.triggered.connect(self.export_image)
         # 打开动作
         open_action = file_menu.addAction("打开")
         open_action.triggered.connect(self.open_drawing)
@@ -94,17 +130,27 @@ class MainWindow(QMainWindow):
                 }
                 # 转换图形数据为可序列化的格式
                 for shape in self.drawing_widget.shapes:
-                    serializable_shape = {
-                        "tool": shape["tool"],
-                        "start_x": shape["start"].x(),
-                        "start_y": shape["start"].y(),
-                        "end_x": shape["end"].x(),
-                        "end_y": shape["end"].y(),
-                        "color": shape["color"].name(),
-                        "line_width": shape["line_width"],
-                        "fill_color": shape["fill_color"].name() if shape["fill_color"] else None
-                    }
-                    save_data["shapes"].append(serializable_shape)
+                    if shape["tool"] == "polygon":
+                        serializable_shape = {
+                            "tool": shape["tool"],
+                            "points": [{"x": p.x(), "y": p.y()} for p in shape["points"]],
+                            "color": shape["color"].name(),
+                            "line_width": shape["line_width"],
+                            "fill_color": shape["fill_color"].name() if shape["fill_color"] else None
+                        }
+                        save_data["shapes"].append(serializable_shape)
+                    else:
+                        serializable_shape = {
+                            "tool": shape["tool"],
+                            "start_x": shape["start"].x(),
+                            "start_y": shape["start"].y(),
+                            "end_x": shape["end"].x(),
+                            "end_y": shape["end"].y(),
+                            "color": shape["color"].name(),
+                            "line_width": shape["line_width"],
+                            "fill_color": shape["fill_color"].name() if shape["fill_color"] else None
+                        }
+                        save_data["shapes"].append(serializable_shape)
                 # 保存为 JSON 文件
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(save_data, f, ensure_ascii=False, indent=2)
@@ -129,15 +175,27 @@ class MainWindow(QMainWindow):
                 
                 # 重新创建图形对象
                 for shape_data in save_data["shapes"]:
-                    shape = {
-                        "tool": shape_data["tool"],
-                        "start": self.drawing_widget._point(shape_data["start_x"], shape_data["start_y"]),
-                        "end": self.drawing_widget._point(shape_data["end_x"], shape_data["end_y"]),
-                        "color": QColor(shape_data["color"]),
-                        "line_width": shape_data["line_width"],
-                        "fill_color": QColor(shape_data["fill_color"]) if shape_data["fill_color"] else None
-                    }
-                    self.drawing_widget.shapes.append(shape)
+                    if shape_data.get("tool") == "polygon":
+                        shape = {
+                            "tool": "polygon",
+                            "points": [
+                                self.drawing_widget._point(pt["x"], pt["y"]) for pt in shape_data.get("points", [])
+                            ],
+                            "color": QColor(shape_data["color"]),
+                            "line_width": shape_data["line_width"],
+                            "fill_color": QColor(shape_data["fill_color"]) if shape_data["fill_color"] else None
+                        }
+                        self.drawing_widget.shapes.append(shape)
+                    else:
+                        shape = {
+                            "tool": shape_data["tool"],
+                            "start": self.drawing_widget._point(shape_data["start_x"], shape_data["start_y"]),
+                            "end": self.drawing_widget._point(shape_data["end_x"], shape_data["end_y"]),
+                            "color": QColor(shape_data["color"]),
+                            "line_width": shape_data["line_width"],
+                            "fill_color": QColor(shape_data["fill_color"]) if shape_data["fill_color"] else None
+                        }
+                        self.drawing_widget.shapes.append(shape)
                 
                 # 更新画布
                 self.drawing_widget.update()
@@ -145,3 +203,19 @@ class MainWindow(QMainWindow):
                 
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"加载失败：{str(e)}")
+
+    def export_image(self):
+        """导出当前画布为图片文件（JPG/PNG等）"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出图片",
+            "",
+            "Image Files (*.jpg *.jpeg *.png *.bmp);;All Files (*)"
+        )
+        if not file_path:
+            return
+        ok = self.drawing_widget.export_image(file_path)
+        if ok:
+            QMessageBox.information(self, "成功", "图片导出成功！")
+        else:
+            QMessageBox.critical(self, "失败", "图片导出失败。")
